@@ -77,6 +77,7 @@ public class MainActivity extends AppCompatActivity
     private final Point bunnyFlvSize = new Point(208, 320);
     private final Point vegetableFlvSize = new Point(368, 480);
     private Point targetPoint = vegetableFlvSize;
+    private volatile boolean isDrawing = false;
 
 //    private Bitmap tempBmp;
 
@@ -196,7 +197,48 @@ public class MainActivity extends AppCompatActivity
     }
 
     public void onStartThreadClick(View view) {
+        loadBackgroundSticker();
         jni.startThread();
+    }
+
+    private void loadBackgroundSticker() {
+        ByteBuffer bb = ByteBuffer.allocateDirect(4 * 3 * 4);
+        bb.order(ByteOrder.nativeOrder());
+        FloatBuffer vertexBuffer = bb.asFloatBuffer();
+
+        float[] vResult = calculateBgStickerVertexes(vegetableFlvSize);
+        vertexBuffer.put(vResult);
+
+        List<FloatBuffer> vList = new ArrayList<>(1);
+        vList.add(vertexBuffer);
+        mTextureMatrix.setSquaerCoords(vList);
+    }
+
+    // 以屏幕宽度为准
+    private float[] calculateBgStickerVertexes(Point stickerSize) {
+        float[] result = new float[12];
+        float width = Screen.mWidth;
+        float height = width * ((float)stickerSize.y / (float)stickerSize.x);
+
+        // calculate for aPoint
+        result[0] = -1.0f;
+        result[1] = -1.0f;
+        result[2] = 0.0f;
+        // calculate for bPoint
+        result[3] = 1.0f;
+        result[4] = -1.0f;
+        result[5] = 0.0f;
+        // calculate for dPoint
+        result[6] = -1.0f;
+        result[7] = 1 - ((Screen.drawHeight - height) / mICamera.cameraWidth) * 2;
+        result[8] = 0.0f;
+        // calculate for cPoint
+        result[9] = 1.0f;
+        result[10] = 1 - ((Screen.drawHeight - height) / mICamera.cameraWidth) * 2;
+        result[11] = 0.0f;
+//        Log.d(TAG, "calculateBgStickerVertexes: coordinate_top_y = " + result[7]);
+
+        return result;
     }
 
     public void onStopThreadClick(View view) {
@@ -211,7 +253,9 @@ public class MainActivity extends AppCompatActivity
     @Override
     public void onDataCome(final byte[] data, final int width, final int height, final int index) {
 
-        OpenGLHelper.fillData(mBitmapBuffer, data);
+        if (!isDrawing) {
+            OpenGLHelper.fillData(mBitmapBuffer, data);
+        }
 
 //        mGlSurfaceView.requestRender();
     }
@@ -311,7 +355,7 @@ public class MainActivity extends AppCompatActivity
             }
 
             synchronized (mTextureMatrix) {
-                mTextureMatrix.setSquaerCoords(vertextBuffers);
+//                mTextureMatrix.setSquaerCoords(vertextBuffers);
             }
         }
         isSuccess = false;
@@ -376,10 +420,10 @@ public class MainActivity extends AppCompatActivity
         Matrix.setLookAtM(mVMatrix, 0, 0, 0, -3, 0f, 0f, 0f, 0f, 1f, 0f);
         Matrix.multiplyMM(mMVPMatrix, 0, mProjMatrix, 0, mVMatrix, 0);
 
-        if (mBitmapBuffer != null && mBitmapBuffer.hasArray()) {
-            OpenGLHelper.loadTexture(mBitmapBuffer, targetPoint, mTextureId); // loadTexture需要在gl线程进行
-            mTextureMatrix.draw(mMVPMatrix);
-        }
+        isDrawing = true;
+        OpenGLHelper.loadTexture(mBitmapBuffer, targetPoint, mTextureId); // loadTexture需要在gl线程进行
+        mTextureMatrix.draw(mMVPMatrix);
+        isDrawing = false;
 
         mSurface.updateTexImage();
     }
