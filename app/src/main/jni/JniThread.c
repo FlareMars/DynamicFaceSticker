@@ -69,8 +69,8 @@ void *thread_decode_video(void* arg) {
         LOGE("GetMethodID() Error.....");
     }
 
-    sprintf(input_str, "%s", "/storage/emulated/0/F_bunny.flv");
-//    sprintf(input_str, "%s", "/storage/emulated/0/B_vegetable.flv");
+//    sprintf(input_str, "%s", "/storage/emulated/0/F_bunny.flv");
+    sprintf(input_str, "%s", "/storage/emulated/0/B_vegetable.flv");
 
     av_log_set_callback(custom_log);
     av_register_all();

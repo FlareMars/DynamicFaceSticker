@@ -75,7 +75,8 @@ public class MainActivity extends AppCompatActivity
     private GLSurfaceView mGlSurfaceView;
 
     private final Point bunnyFlvSize = new Point(208, 320);
-    private final Point vegetableFlvSize = new Point(360, 480);
+    private final Point vegetableFlvSize = new Point(368, 480);
+    private Point targetPoint = vegetableFlvSize;
 
 //    private Bitmap tempBmp;
 
@@ -277,7 +278,7 @@ public class MainActivity extends AppCompatActivity
                     PointF pivotUp = new PointF(pivotDown.x,
                             (face.points[LandmarkConstants.MG_LEFT_EYEBROW_UPPER_MIDDLE].y + face.points[LandmarkConstants.MG_RIGHT_EYEBROW_UPPER_MIDDLE].y) / 2);
                     float baseHeight = (pivotDown.y - pivotUp.y) * 1.5f;
-                    float targetWidth = baseHeight * ((float)bunnyFlvSize.x / (float)bunnyFlvSize.y);
+                    float targetWidth = baseHeight * ((float)targetPoint.x / (float)targetPoint.y);
 //                            Log.d(TAG, "run: height = " + baseHeight + " width = " + targetWidth);
 
                     float[] aPoint = new float[] {pivotDown.x - targetWidth / 2, pivotDown.y}; // left_bottom
@@ -343,8 +344,8 @@ public class MainActivity extends AppCompatActivity
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
         GLES20.glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 
-        mBitmapBuffer = OpenGLHelper.createEmptyRGBABuffer(bunnyFlvSize);
-        mTextureId = OpenGLHelper.loadTexture(mBitmapBuffer, bunnyFlvSize, mTextureId);
+        mBitmapBuffer = OpenGLHelper.createEmptyRGBABuffer(targetPoint);
+        mTextureId = OpenGLHelper.loadTexture(mBitmapBuffer, targetPoint, mTextureId);
         mTextureMatrix = new TextureMatrix(mTextureId);
 
         mCameraTextureId = OpenGLHelper.createTextureID();
@@ -376,7 +377,7 @@ public class MainActivity extends AppCompatActivity
         Matrix.multiplyMM(mMVPMatrix, 0, mProjMatrix, 0, mVMatrix, 0);
 
         if (mBitmapBuffer != null && mBitmapBuffer.hasArray()) {
-            OpenGLHelper.loadTexture(mBitmapBuffer, bunnyFlvSize, mTextureId); // loadTexture需要在gl线程进行
+            OpenGLHelper.loadTexture(mBitmapBuffer, targetPoint, mTextureId); // loadTexture需要在gl线程进行
             mTextureMatrix.draw(mMVPMatrix);
         }
 
