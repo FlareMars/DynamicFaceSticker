@@ -1,6 +1,7 @@
 package com.flarejaven.example.jnithread.activity;
 
 import android.graphics.Point;
+import android.graphics.PointF;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.opengl.GLES20;
@@ -19,6 +20,7 @@ import com.facepp.library.util.CameraMatrix;
 import com.facepp.library.util.ConUtil;
 import com.facepp.library.util.DialogUtil;
 import com.facepp.library.util.ICamera;
+import com.facepp.library.util.LandmarkConstants;
 import com.facepp.library.util.Screen;
 import com.facepp.library.util.SensorEventUtil;
 import com.flarejaven.example.jnithread.NdkJniUtils;
@@ -165,7 +167,7 @@ public class MainActivity extends AppCompatActivity
             faceppConfig.roi_top = top;
             faceppConfig.roi_right = right;
             faceppConfig.roi_bottom = bottom;
-            faceppConfig.detectionMode = Facepp.FaceppConfig.DETECTION_MODE_TRACKING_SMOOTH;
+            faceppConfig.detectionMode = Facepp.FaceppConfig.DETECTION_MODE_TRACKING;
             facepp.setFaceppConfig(faceppConfig);
         } else {
             mDialogUtil.showDialog("打开相机失败");
@@ -220,77 +222,121 @@ public class MainActivity extends AppCompatActivity
         }
         isSuccess = true;
 
-        mHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                int width = mICamera.cameraWidth;
-                int height = mICamera.cameraHeight;
+        int width = mICamera.cameraWidth;
+        int height = mICamera.cameraHeight;
 
-                int orientation = sensorUtil.orientation;
-                if (orientation == 0) {
-                    rotation = angle;
-                } else if (orientation == 1) {
-                    rotation = 0;
-                } else if (orientation == 2) {
-                    rotation = 180;
-                } else if (orientation == 3) {
-                    rotation = 360 - angle;
-                }
+        int orientation = sensorUtil.orientation;
+        if (orientation == 0) {
+            rotation = angle;
+        } else if (orientation == 1) {
+            rotation = 0;
+        } else if (orientation == 2) {
+            rotation = 180;
+        } else if (orientation == 3) {
+            rotation = 360 - angle;
+        }
 
-                setConfig(rotation);
+        setConfig(rotation);
 
-                final Facepp.Face[] faces = facepp.detect(imgData, width, height, Facepp.IMAGEMODE_NV21); // PreviewCallback default format is NV21
+        final Facepp.Face[] faces = facepp.detect(imgData, width, height, Facepp.IMAGEMODE_NV21); // PreviewCallback default format is NV21
 
-                if (faces != null) {
-                    List<FloatBuffer> vertextBuffers = new ArrayList<>();
+        if (faces != null) {
+            List<FloatBuffer> vertextBuffers = new ArrayList<>();
+//                    Log.d(TAG, "run: faces_size = " + faces.length);
 
-                    if (faces.length >= 0) {
-                        for (int c = 0; c < faces.length; c++) {
-                            if (is106Points)
-                                facepp.getLandmark(faces[c], Facepp.FPP_GET_LANDMARK106);
-                            else
-                                facepp.getLandmark(faces[c], Facepp.FPP_GET_LANDMARK81);
-
-                            if (is3DPose) {
-                                facepp.get3DPose(faces[c]);
-                            }
-
-                            pitch = faces[c].pitch;
-                            yaw = faces[c].yaw;
-                            roll = faces[c].roll;
-
-                            if (orientation == 1 || orientation == 2) {
-                                width = mICamera.cameraHeight;
-                                height = mICamera.cameraWidth;
-                            }
-
-                            double real_roll = roll + Math.PI + (rotation / 180.0f) * Math.PI;
-                            while (real_roll > 2 * Math.PI)
-                                real_roll -= 2 * Math.PI;
-                            roll = (float)(real_roll - Math.PI);
-                            float rad = (float) (Math.PI - Math.abs(roll));
-                            rad = roll > 0 ? rad : -rad;
-
-                            // calculate transformed rect for big eye
-//                            vertextBuffers.add(calculateEyeRect(faces[c].points, rad, rollToLeft, height, width, orientation, true));
-//                            vertextBuffers.add(calculateEyeRect(faces[c].points, rad, rollToLeft, height, width, orientation, false));
-                        }
+            if (faces.length >= 0) {
+                for (Facepp.Face face : faces) {
+                    if (is106Points) {
+                        facepp.getLandmark(face, Facepp.FPP_GET_LANDMARK106);
                     } else {
-                        pitch = 0.0f;
-                        yaw = 0.0f;
-                        roll = 0.0f;
+                        facepp.getLandmark(face, Facepp.FPP_GET_LANDMARK81);
                     }
 
-//                    synchronized (mTextureMatrix) {
-//                        mTextureMatrix.setSquaerCoords(vertextBuffers);
-//                    }
+                    if (is3DPose) {
+                        facepp.get3DPose(face);
+                    }
+
+                    pitch = face.pitch;
+                    yaw = face.yaw;
+                    roll = face.roll;
+
+                    if (orientation == 1 || orientation == 2) {
+                        width = mICamera.cameraHeight;
+                        height = mICamera.cameraWidth;
+                    }
+
+                    double real_roll = roll + Math.PI + (rotation / 180.0f) * Math.PI;
+                    while (real_roll > 2 * Math.PI)
+                        real_roll -= 2 * Math.PI;
+                    roll = (float)(real_roll - Math.PI);
+                    float rad = (float) (Math.PI - Math.abs(roll));
+                    rad = roll > 0 ? rad : -rad;
+
+                    PointF pivotDown = new PointF(face.points[LandmarkConstants.MG_MOUTH_UPPER_LIP_BOTTOM].x,
+                            face.points[LandmarkConstants.MG_MOUTH_UPPER_LIP_BOTTOM].y);
+                    PointF pivotUp = new PointF(pivotDown.x,
+                            (face.points[LandmarkConstants.MG_LEFT_EYEBROW_UPPER_MIDDLE].y + face.points[LandmarkConstants.MG_RIGHT_EYEBROW_UPPER_MIDDLE].y) / 2);
+                    float baseHeight = (pivotDown.y - pivotUp.y) * 1.5f;
+                    float targetWidth = baseHeight * ((float)bunnyFlvSize.x / (float)bunnyFlvSize.y);
+//                            Log.d(TAG, "run: height = " + baseHeight + " width = " + targetWidth);
+
+                    float[] aPoint = new float[] {pivotDown.x - targetWidth / 2, pivotDown.y}; // left_bottom
+                    float[] bPoint = new float[] {pivotDown.x + targetWidth / 2, pivotDown.y}; // right_bottom
+                    float[] cPoint = new float[] {pivotUp.x + targetWidth / 2, pivotUp.y}; // right_top
+                    float[] dPoint = new float[] {pivotUp.x - targetWidth / 2, pivotUp.y}; // left_top
+
+                    android.graphics.Matrix matrix = new android.graphics.Matrix();
+                    matrix.postRotate((float) Math.toDegrees(rad), pivotDown.x, pivotDown.y);
+                    matrix.mapPoints(aPoint);
+                    matrix.mapPoints(bPoint);
+                    matrix.mapPoints(cPoint);
+                    matrix.mapPoints(dPoint);
+
+                    ByteBuffer bb = ByteBuffer.allocateDirect(4 * 3 * 4);
+                    bb.order(ByteOrder.nativeOrder());
+                    FloatBuffer vertexBuffer = bb.asFloatBuffer();
+                    vertexBuffer.put(screenCoorToGLCoor(aPoint, height, width, orientation));
+                    vertexBuffer.put(screenCoorToGLCoor(bPoint, height, width, orientation));
+                    vertexBuffer.put(screenCoorToGLCoor(dPoint, height, width, orientation));
+                    vertexBuffer.put(screenCoorToGLCoor(cPoint, height, width, orientation));
+                    vertexBuffer.position(0);
+
+                    vertextBuffers.add(vertexBuffer);
                 }
-                isSuccess = false;
-                if (!isTiming) {
-                    timeHandle.sendEmptyMessage(1);
-                }
+            } else {
+                pitch = 0.0f;
+                yaw = 0.0f;
+                roll = 0.0f;
             }
-        });
+
+            synchronized (mTextureMatrix) {
+                mTextureMatrix.setSquaerCoords(vertextBuffers);
+            }
+        }
+        isSuccess = false;
+        if (!isTiming) {
+            timeHandle.sendEmptyMessage(1);
+        }
+    }
+
+    private float[] screenCoorToGLCoor(float[] point, int height, int width, int orientation) {
+        float x = (point[0] / height) * 2 - 1;
+        if (isBackCamera)
+            x = -x;
+        float y = 1 - (point[1] / width) * 2;
+
+        float[] pointf = new float[] { x, y, 0.0f };
+        if (orientation == 1)
+            pointf = new float[] { -y, x, 0.0f };
+        if (orientation == 2)
+            pointf = new float[] { y, -x, 0.0f };
+        if (orientation == 3)
+            pointf = new float[] { -x, -y, 0.0f };
+        return pointf;
+    }
+
+    private float[] screenCoorToGLCoor(PointF point, int height, int width, int orientation) {
+        return screenCoorToGLCoor(new float[] {point.x, point.y}, height, width, orientation);
     }
 
     @Override
