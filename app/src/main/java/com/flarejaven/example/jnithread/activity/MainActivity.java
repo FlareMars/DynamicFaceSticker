@@ -347,15 +347,6 @@ public class MainActivity extends AppCompatActivity
         mTextureId = OpenGLHelper.loadTexture(mBitmapBuffer, bunnyFlvSize, mTextureId);
         mTextureMatrix = new TextureMatrix(mTextureId);
 
-        ByteBuffer bb = ByteBuffer.allocateDirect(4 * 3 * 4);
-        bb.order(ByteOrder.nativeOrder());
-        FloatBuffer vertexBuffer = bb.asFloatBuffer();
-        vertexBuffer.put(TextureMatrix.COORD1);
-        List<FloatBuffer> vList = new ArrayList<>();
-        vList.add(vertexBuffer);
-
-        mTextureMatrix.setSquaerCoords(vList);
-
         mCameraTextureId = OpenGLHelper.createTextureID();
         mSurface = new SurfaceTexture(mCameraTextureId);
         mSurface.setOnFrameAvailableListener(this);
@@ -383,8 +374,11 @@ public class MainActivity extends AppCompatActivity
 
         Matrix.setLookAtM(mVMatrix, 0, 0, 0, -3, 0f, 0f, 0f, 0f, 1f, 0f);
         Matrix.multiplyMM(mMVPMatrix, 0, mProjMatrix, 0, mVMatrix, 0);
-        OpenGLHelper.loadTexture(mBitmapBuffer, bunnyFlvSize, mTextureId); // loadTexture需要在gl线程进行
-        mTextureMatrix.draw(mMVPMatrix);
+
+        if (mBitmapBuffer != null && mBitmapBuffer.hasArray()) {
+            OpenGLHelper.loadTexture(mBitmapBuffer, bunnyFlvSize, mTextureId); // loadTexture需要在gl线程进行
+            mTextureMatrix.draw(mMVPMatrix);
+        }
 
         mSurface.updateTexImage();
     }

@@ -81,9 +81,11 @@ public class OpenGLHelper {
     }
 
     public static void fillData(ByteBuffer byteBuffers, byte[] data) {
-        byteBuffers.clear();
-        byteBuffers.put(data);
-        byteBuffers.position(0);
+        if (byteBuffers != null && byteBuffers.capacity() >= data.length) {
+            byteBuffers.clear();
+            byteBuffers.put(data);
+            byteBuffers.position(0);
+        }
     }
 
     public static int loadTexture(final ByteBuffer data, final Point size, final int usedTexId) {
