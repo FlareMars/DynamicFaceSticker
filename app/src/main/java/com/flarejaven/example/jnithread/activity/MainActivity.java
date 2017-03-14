@@ -44,6 +44,8 @@ public class MainActivity extends AppCompatActivity
         implements NdkJniUtils.OnDataComeListener, GLSurfaceView.Renderer, Camera.PreviewCallback, SurfaceTexture.OnFrameAvailableListener {
 
     private static final String TAG = "MainActivity";
+    private static final int INDEX_FOREGROUND_STICKER = 0;
+    private static final int INDEX_BACKGROUND_STICKER = 1;
 
     // face tracker parameters
     private boolean is3DPose = true;
@@ -55,8 +57,6 @@ public class MainActivity extends AppCompatActivity
     private Camera mCamera;
     private DialogUtil mDialogUtil;
 
-    private HandlerThread mHandlerThread = new HandlerThread("facepp");
-    private Handler mHandler;
     private Facepp facepp;
     private int min_face_size = 200;
     private int detection_interval = 25;
@@ -76,16 +76,18 @@ public class MainActivity extends AppCompatActivity
 
     private final Point bunnyFlvSize = new Point(208, 320);
     private final Point vegetableFlvSize = new Point(368, 480);
-    private Point targetPoint = vegetableFlvSize;
     private volatile boolean isDrawing = false;
 
 //    private Bitmap tempBmp;
 
-    private ByteBuffer mBitmapBuffer;
-    private int mTextureId = OpenGLHelper.NO_TEXTURE;
+    private volatile boolean reloadStickers = false;
+    private int mStickerNum = 0;
+    private List<Point> mStickerSizes = new ArrayList<>();
+    private List<ByteBuffer> mBitmapBuffers = new ArrayList<>();
+    private List<Integer> mTextureIds = new ArrayList<>();
+    private List<TextureMatrix> mTextureMatrixs = new ArrayList<>();
     private int mCameraTextureId = OpenGLHelper.NO_TEXTURE;
     private SurfaceTexture mSurface;
-    private TextureMatrix mTextureMatrix;
     private CameraMatrix mCameraMatrix;
 
     private final float[] mMVPMatrix = new float[16];
@@ -124,9 +126,6 @@ public class MainActivity extends AppCompatActivity
 
         sensorUtil = new SensorEventUtil(this);
 
-        mHandlerThread.start();
-        mHandler = new Handler(mHandlerThread.getLooper());
-
         mGlSurfaceView = (GLSurfaceView) findViewById(R.id.glSurfaceView);
         mGlSurfaceView.setEGLContextClientVersion(2);
         mGlSurfaceView.setRenderer(this);
@@ -140,6 +139,7 @@ public class MainActivity extends AppCompatActivity
     protected void onResume() {
         super.onResume();
         ConUtil.acquireWakeLock(this);
+        mGlSurfaceView.onResume();
         mCamera = mICamera.openCamera(isBackCamera, this, resolutionMap);
         if (mCamera != null) {
             angle = 360 - mICamera.Angle;
@@ -179,6 +179,7 @@ public class MainActivity extends AppCompatActivity
     @Override
     protected void onPause() {
         super.onPause();
+        mGlSurfaceView.onPause();
         onStopThreadClick(null);
 
         ConUtil.releaseWakeLock();
@@ -197,8 +198,39 @@ public class MainActivity extends AppCompatActivity
     }
 
     public void onStartThreadClick(View view) {
-        loadBackgroundSticker();
-        jni.startThread();
+        reloadStickers = true;
+    }
+
+    // 配置贴纸信息
+    private void loadStickers() {
+        mStickerNum = 2;
+        mStickerSizes.add(bunnyFlvSize);
+        mStickerSizes.add(vegetableFlvSize);
+
+        for (int i = 0; i < mStickerNum; i++) {
+            ByteBuffer bitmapBuffer = OpenGLHelper.createEmptyRGBABuffer(mStickerSizes.get(i));
+            Integer textureId = OpenGLHelper.loadTexture(bitmapBuffer, mStickerSizes.get(i), OpenGLHelper.NO_TEXTURE);
+            TextureMatrix textureMatrix = new TextureMatrix(textureId);
+            mBitmapBuffers.add(bitmapBuffer);
+            mTextureIds.add(textureId);
+            mTextureMatrixs.add(textureMatrix);
+        }
+
+        if (mStickerNum == 2) {
+            loadBackgroundSticker();
+        }
+    }
+
+    private void resetData(boolean requestRender) {
+        mStickerNum = 0;
+//        mStickerSizes.clear();
+//        mBitmapBuffers.clear();
+//        mTextureIds.clear();
+//        mTextureMatrixs.clear();
+
+        if (requestRender) {
+            mGlSurfaceView.requestRender();
+        }
     }
 
     private void loadBackgroundSticker() {
@@ -206,12 +238,12 @@ public class MainActivity extends AppCompatActivity
         bb.order(ByteOrder.nativeOrder());
         FloatBuffer vertexBuffer = bb.asFloatBuffer();
 
-        float[] vResult = calculateBgStickerVertexes(vegetableFlvSize);
+        float[] vResult = calculateBgStickerVertexes(mStickerSizes.get(INDEX_BACKGROUND_STICKER));
         vertexBuffer.put(vResult);
 
         List<FloatBuffer> vList = new ArrayList<>(1);
         vList.add(vertexBuffer);
-        mTextureMatrix.setSquaerCoords(vList);
+        mTextureMatrixs.get(INDEX_BACKGROUND_STICKER).setSquaerCoords(vList);
     }
 
     // 以屏幕宽度为准
@@ -246,15 +278,16 @@ public class MainActivity extends AppCompatActivity
             @Override
             public void run() {
                 jni.endThread();
+                resetData(true);
             }
         }).start();
     }
 
     @Override
     public void onDataCome(final byte[] data, final int width, final int height, final int index) {
-
+//        Log.d(TAG, "onDataCome: " + "width = " + width + " height = " + height + " index = " +index);
         if (!isDrawing) {
-            OpenGLHelper.fillData(mBitmapBuffer, data);
+            OpenGLHelper.fillData(mBitmapBuffers.get(index), data);
         }
 
 //        mGlSurfaceView.requestRender();
@@ -289,7 +322,7 @@ public class MainActivity extends AppCompatActivity
             List<FloatBuffer> vertextBuffers = new ArrayList<>();
 //                    Log.d(TAG, "run: faces_size = " + faces.length);
 
-            if (faces.length >= 0) {
+            if (faces.length >= 0 && mStickerNum >= 1) {
                 for (Facepp.Face face : faces) {
                     if (is106Points) {
                         facepp.getLandmark(face, Facepp.FPP_GET_LANDMARK106);
@@ -322,7 +355,7 @@ public class MainActivity extends AppCompatActivity
                     PointF pivotUp = new PointF(pivotDown.x,
                             (face.points[LandmarkConstants.MG_LEFT_EYEBROW_UPPER_MIDDLE].y + face.points[LandmarkConstants.MG_RIGHT_EYEBROW_UPPER_MIDDLE].y) / 2);
                     float baseHeight = (pivotDown.y - pivotUp.y) * 1.5f;
-                    float targetWidth = baseHeight * ((float)targetPoint.x / (float)targetPoint.y);
+                    float targetWidth = baseHeight * ((float)mStickerSizes.get(INDEX_FOREGROUND_STICKER).x / (float)mStickerSizes.get(INDEX_FOREGROUND_STICKER).y);
 //                            Log.d(TAG, "run: height = " + baseHeight + " width = " + targetWidth);
 
                     float[] aPoint = new float[] {pivotDown.x - targetWidth / 2, pivotDown.y}; // left_bottom
@@ -348,14 +381,11 @@ public class MainActivity extends AppCompatActivity
 
                     vertextBuffers.add(vertexBuffer);
                 }
+                mTextureMatrixs.get(INDEX_FOREGROUND_STICKER).setSquaerCoords(vertextBuffers);
             } else {
                 pitch = 0.0f;
                 yaw = 0.0f;
                 roll = 0.0f;
-            }
-
-            synchronized (mTextureMatrix) {
-//                mTextureMatrix.setSquaerCoords(vertextBuffers);
             }
         }
         isSuccess = false;
@@ -388,10 +418,6 @@ public class MainActivity extends AppCompatActivity
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
         GLES20.glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 
-        mBitmapBuffer = OpenGLHelper.createEmptyRGBABuffer(targetPoint);
-        mTextureId = OpenGLHelper.loadTexture(mBitmapBuffer, targetPoint, mTextureId);
-        mTextureMatrix = new TextureMatrix(mTextureId);
-
         mCameraTextureId = OpenGLHelper.createTextureID();
         mSurface = new SurfaceTexture(mCameraTextureId);
         mSurface.setOnFrameAvailableListener(this);
@@ -420,9 +446,24 @@ public class MainActivity extends AppCompatActivity
         Matrix.setLookAtM(mVMatrix, 0, 0, 0, -3, 0f, 0f, 0f, 0f, 1f, 0f);
         Matrix.multiplyMM(mMVPMatrix, 0, mProjMatrix, 0, mVMatrix, 0);
 
+        if (reloadStickers) {
+            reloadStickers = false;
+            loadStickers();
+            jni.startThread();
+        }
+
         isDrawing = true;
-        OpenGLHelper.loadTexture(mBitmapBuffer, targetPoint, mTextureId); // loadTexture需要在gl线程进行
-        mTextureMatrix.draw(mMVPMatrix);
+        for (int i = mStickerNum - 1; i >= 0; i--) {
+            OpenGLHelper.loadTexture(mBitmapBuffers.get(i),
+                    mStickerSizes.get(i), mTextureIds.get(i));
+            mTextureMatrixs.get(i).draw(mMVPMatrix);
+            if (mStickerNum == 0) {
+                mBitmapBuffers.clear();
+                mStickerSizes.clear();
+                mTextureIds.clear();
+                mTextureMatrixs.clear();
+            }
+        }
         isDrawing = false;
 
         mSurface.updateTexImage();

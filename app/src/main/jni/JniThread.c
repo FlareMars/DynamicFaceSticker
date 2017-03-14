@@ -16,6 +16,7 @@
 #define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, "native-activity", __VA_ARGS__))
 
 #define NUMTHREADS 1
+#define ITEM_SIZE 2
 
 JavaVM *g_jvm = NULL;
 jobject g_obj = NULL;
@@ -23,6 +24,9 @@ int flag = 0;
 pthread_t pt[NUMTHREADS];
 pthread_cond_t cond;
 pthread_mutex_t mutex;
+
+
+int itemSize = 2; // 指明同时使用多少个贴纸
 
 // Output FFmpeg's av_log()
 void custom_log(void *ptr, int level, const char* fmt, va_list vl) {
@@ -35,20 +39,25 @@ void custom_log(void *ptr, int level, const char* fmt, va_list vl) {
 }
 
 void *thread_decode_video(void* arg) {
-    AVFormatContext *pFormatCtx;
-    int videoIndex;
-    AVCodecContext *pCodecCtx;
-    AVCodec *pCodec;
-    AVFrame *pFrame, *pFrameRGBA;
-    jbyteArray array;
-    uint8_t *out_buffer;
-    AVPacket *packet;
-    struct SwsContext *img_convert_ctx;
-    int frame_cnt;
-    int byteSizes;
-    char input_str[500] = {0};
+    char *input_strs[2] = {
+        "/storage/emulated/0/F_bunny.flv",
+        "/storage/emulated/0/B_vegetable.flv"
+    };
+    //    sprintf(input_str, "%s", "/storage/emulated/0/F_bunny.flv");
+    //    sprintf(input_str2, "%s", "/storage/emulated/0/B_vegetable.flv");
+
+    AVFormatContext *pFormatCtxs[ITEM_SIZE];
+    int videoIndexes[ITEM_SIZE] = {-1, -1};
+    AVCodecContext *pCodecCtxs[ITEM_SIZE];
+    AVCodec *pCodecs[ITEM_SIZE];
+    AVFrame *pFrames[ITEM_SIZE], *pFrameRGBAs[ITEM_SIZE];
+    jbyteArray arrays[ITEM_SIZE];
+    uint8_t *out_buffers[ITEM_SIZE];
+    AVPacket *packets[ITEM_SIZE];
+    struct SwsContext *img_convert_ctxs[ITEM_SIZE];
+    int byteSizeses[ITEM_SIZE];
     int ret, got_picture;
-    int i;
+    int i, j;
 
     JNIEnv *env;
     jclass cls;
@@ -69,89 +78,86 @@ void *thread_decode_video(void* arg) {
         LOGE("GetMethodID() Error.....");
     }
 
-//    sprintf(input_str, "%s", "/storage/emulated/0/F_bunny.flv");
-    sprintf(input_str, "%s", "/storage/emulated/0/B_vegetable.flv");
-
     av_log_set_callback(custom_log);
     av_register_all();
     avformat_network_init();
 
-    pFormatCtx = avformat_alloc_context();
+    for (i = 0; i < itemSize; i++) {
+        pFormatCtxs[i] = avformat_alloc_context();
 
-    if(avformat_open_input(&pFormatCtx, input_str, NULL, NULL) != 0) {
-        LOGE("Couldn't open input stream.\n");
-        return -1;
-    }
-    if(avformat_find_stream_info(pFormatCtx, NULL) < 0) {
-        LOGE("Couldn't find stream information.\n");
-        return -1;
-    }
-
-    videoIndex = -1;
-    for (i = 0; i < pFormatCtx->nb_streams; i++) {
-        if(pFormatCtx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
-            videoIndex = i;
-            break;
+        if(avformat_open_input(&pFormatCtxs[i], input_strs[i], NULL, NULL) != 0) {
+            LOGE("Couldn't open input stream.\n");
+            return -1;
         }
+        if(avformat_find_stream_info(pFormatCtxs[i], NULL) < 0) {
+            LOGE("Couldn't find stream information.\n");
+            return -1;
+        }
+
+        for (j = 0; j < pFormatCtxs[i]->nb_streams; j++) {
+            if(pFormatCtxs[i]->streams[j]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+                videoIndexes[i] = j;
+                break;
+            }
+        }
+        if (videoIndexes[i] == -1) {
+            LOGE("Couldn't find a video stream.\n");
+            return -1;
+        }
+
+        pCodecCtxs[i] = pFormatCtxs[i]->streams[videoIndexes[i]]->codec;
+
+        pCodecs[i] = avcodec_find_decoder(pCodecCtxs[i]->codec_id);
+        if (pCodecs[i] == NULL) {
+            LOGE("Couldn't find Codec.\n");
+            return -1;
+        }
+        if (avcodec_open2(pCodecCtxs[i], pCodecs[i], NULL) < 0) {
+            LOGE("Couldn't open codec.\n");
+            return -1;
+        }
+
+        pFrames[i] = av_frame_alloc();
+        pFrameRGBAs[i] = av_frame_alloc();
+        out_buffers[i] = (unsigned char *)av_malloc(av_image_get_buffer_size(AV_PIX_FMT_RGBA, pCodecCtxs[i]->width, pCodecCtxs[i]->height, 1));
+        av_image_fill_arrays(pFrameRGBAs[i]->data, pFrameRGBAs[i]->linesize, out_buffers[i],
+            AV_PIX_FMT_RGBA, pCodecCtxs[i]->width, pCodecCtxs[i]->height, 1);
+        LOGI("%d, %d", pCodecCtxs[i]->width, pCodecCtxs[i]->height);
+        byteSizeses[i] = pCodecCtxs[i]->width * pCodecCtxs[i]->height * 4;
+        arrays[i] = (*env)->NewByteArray(env, byteSizeses[i]);
+        packets[i] = (AVPacket *)av_malloc(sizeof(AVPacket));
+
+        img_convert_ctxs[i] = sws_getContext(pCodecCtxs[i]->width, pCodecCtxs[i]->height, pCodecCtxs[i]->pix_fmt,
+            pCodecCtxs[i]->width, pCodecCtxs[i]->height, AV_PIX_FMT_RGBA, SWS_BICUBIC, NULL, NULL, NULL);
+
     }
-    if(videoIndex == -1) {
-        LOGE("Couldn't find a video stream.\n");
-        return -1;
-    }
 
-    pCodecCtx = pFormatCtx->streams[videoIndex]->codec;
-
-    pCodec = avcodec_find_decoder(pCodecCtx->codec_id);
-    if (pCodec == NULL) {
-        LOGE("Couldn't find Codec.\n");
-        return -1;
-    }
-    if (avcodec_open2(pCodecCtx, pCodec, NULL) < 0) {
-        LOGE("Couldn't open codec.\n");
-        return -1;
-    }
-
-    pFrame = av_frame_alloc();
-    pFrameRGBA = av_frame_alloc();
-    out_buffer = (unsigned char *)av_malloc(av_image_get_buffer_size(AV_PIX_FMT_RGBA, pCodecCtx->width, pCodecCtx->height, 1));
-    av_image_fill_arrays(pFrameRGBA->data, pFrameRGBA->linesize, out_buffer,
-        AV_PIX_FMT_RGBA, pCodecCtx->width, pCodecCtx->height, 1);
-    LOGI("%d, %d", pCodecCtx->width, pCodecCtx->height);
-    byteSizes = pCodecCtx->width * pCodecCtx->height * 4;
-    array = (*env)->NewByteArray(env, byteSizes);
-    packet = (AVPacket *)av_malloc(sizeof(AVPacket));
-
-    img_convert_ctx = sws_getContext(pCodecCtx->width, pCodecCtx->height, pCodecCtx->pix_fmt,
-        pCodecCtx->width, pCodecCtx->height, AV_PIX_FMT_RGBA, SWS_BICUBIC, NULL, NULL, NULL);
-
-    frame_cnt = 0;
     struct timeval now;
     struct timespec outtime;
     pthread_mutex_lock(&mutex);
     while (flag == 1) {
-        if (av_read_frame(pFormatCtx, packet) >= 0) {
-            if (packet->stream_index == videoIndex) {
-                ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, packet);
-                if (ret < 0) {
-                    LOGE("Decode Error.\n");
-                    return -1;
-                }
-                if (got_picture) {
-                    sws_scale(img_convert_ctx, (const uint8_t* const*)pFrame->data, pFrame->linesize, 0, pCodecCtx->height,
-                        pFrameRGBA->data, pFrameRGBA->linesize);
-                    frame_cnt++;
-//                    LOGI("frame #%d", frame_cnt);
+        for (i = 0; i < itemSize; i++) {
+            if (av_read_frame(pFormatCtxs[i], packets[i]) >= 0) {
+                if (packets[i]->stream_index == videoIndexes[i]) {
+                    ret = avcodec_decode_video2(pCodecCtxs[i], pFrames[i], &got_picture, packets[i]);
+                    if (ret < 0) {
+                        LOGE("Decode Error.\n");
+                        return -1;
+                    }
+                    if (got_picture) {
+                        sws_scale(img_convert_ctxs[i], (const uint8_t* const*)pFrames[i]->data, pFrames[i]->linesize, 0, pCodecCtxs[i]->height,
+                            pFrameRGBAs[i]->data, pFrameRGBAs[i]->linesize);
 
-                    (*env)->SetByteArrayRegion(env, array, 0, byteSizes, pFrameRGBA->data[0]);
-                    (*env)->CallVoidMethod(env, g_obj, mid, array, (jint)pCodecCtx->width, (jint)pCodecCtx->height, (jint)0);
+                        (*env)->SetByteArrayRegion(env, arrays[i], 0, byteSizeses[i], pFrameRGBAs[i]->data[0]);
+                        (*env)->CallVoidMethod(env, g_obj, mid, arrays[i], (jint)pCodecCtxs[i]->width, (jint)pCodecCtxs[i]->height, (jint)i);
+                    }
                 }
+                av_free_packet(packets[i]);
+            } else {
+        //            LOGI("video reset!");
+                av_seek_frame(pFormatCtxs[i], videoIndexes[i], 0, AVSEEK_FLAG_BACKWARD);
+                avcodec_flush_buffers(pFormatCtxs[i]->streams[videoIndexes[i]]->codec);
             }
-            av_free_packet(packet);
-        } else {
-//            LOGI("video reset!");
-            frame_cnt = 0;
-            av_seek_frame(pFormatCtx, videoIndex, 0, AVSEEK_FLAG_BACKWARD);
-            avcodec_flush_buffers(pFormatCtx->streams[videoIndex]->codec);
         }
 
         gettimeofday(&now, NULL);
@@ -161,12 +167,14 @@ void *thread_decode_video(void* arg) {
     }
     pthread_mutex_unlock(&mutex);
 
-    sws_freeContext(img_convert_ctx);
-    av_frame_free(&pFrameRGBA);
-    av_frame_free(&pFrame);
-    avcodec_close(pCodecCtx);
-    avformat_close_input(&pFormatCtx);
-    (*env)->DeleteLocalRef(env, array);
+    for (i = 0; i < itemSize; i++) {
+        sws_freeContext(img_convert_ctxs[i]);
+        av_frame_free(&pFrameRGBAs[i]);
+        av_frame_free(&pFrames[i]);
+        avcodec_close(pCodecCtxs[i]);
+        avformat_close_input(&pFormatCtxs[i]);
+        (*env)->DeleteLocalRef(env, arrays[i]);
+    }
 
     pthread_join(pt[(int)arg], NULL);
 
