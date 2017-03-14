@@ -352,16 +352,16 @@ public class MainActivity extends AppCompatActivity
 
                     PointF pivotDown = new PointF(face.points[LandmarkConstants.MG_MOUTH_UPPER_LIP_BOTTOM].x,
                             face.points[LandmarkConstants.MG_MOUTH_UPPER_LIP_BOTTOM].y);
-                    PointF pivotUp = new PointF(pivotDown.x,
-                            (face.points[LandmarkConstants.MG_LEFT_EYEBROW_UPPER_MIDDLE].y + face.points[LandmarkConstants.MG_RIGHT_EYEBROW_UPPER_MIDDLE].y) / 2);
-                    float baseHeight = (pivotDown.y - pivotUp.y) * 1.5f;
-                    float targetWidth = baseHeight * ((float)mStickerSizes.get(INDEX_FOREGROUND_STICKER).x / (float)mStickerSizes.get(INDEX_FOREGROUND_STICKER).y);
-//                            Log.d(TAG, "run: height = " + baseHeight + " width = " + targetWidth);
+                    float targetWidth = distance(face.points[LandmarkConstants.MG_CONTOUR_LEFT2].x, face.points[LandmarkConstants.MG_CONTOUR_LEFT2].y,
+                            face.points[LandmarkConstants.MG_CONTOUR_RIGHT2].x, face.points[LandmarkConstants.MG_CONTOUR_RIGHT2].y);
+                    targetWidth *= 1.2f; // TODO size coefficient of correction
+                    float targetHeight = targetWidth * ((float)mStickerSizes.get(INDEX_FOREGROUND_STICKER).y / (float)mStickerSizes.get(INDEX_FOREGROUND_STICKER).x);
+                    Log.d(TAG, "run: height = " + targetHeight + " width = " + targetWidth);
 
                     float[] aPoint = new float[] {pivotDown.x - targetWidth / 2, pivotDown.y}; // left_bottom
                     float[] bPoint = new float[] {pivotDown.x + targetWidth / 2, pivotDown.y}; // right_bottom
-                    float[] cPoint = new float[] {pivotUp.x + targetWidth / 2, pivotUp.y}; // right_top
-                    float[] dPoint = new float[] {pivotUp.x - targetWidth / 2, pivotUp.y}; // left_top
+                    float[] cPoint = new float[] {bPoint[0], pivotDown.y - targetHeight}; // right_top
+                    float[] dPoint = new float[] {aPoint[0], pivotDown.y - targetHeight}; // left_top
 
                     android.graphics.Matrix matrix = new android.graphics.Matrix();
                     matrix.postRotate((float) Math.toDegrees(rad), pivotDown.x, pivotDown.y);
@@ -392,6 +392,10 @@ public class MainActivity extends AppCompatActivity
         if (!isTiming) {
             timeHandle.sendEmptyMessage(1);
         }
+    }
+
+    private float distance(float x1, float y1, float x2, float y2) {
+        return (float) Math.sqrt(Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2));
     }
 
     private float[] screenCoorToGLCoor(float[] point, int height, int width, int orientation) {
