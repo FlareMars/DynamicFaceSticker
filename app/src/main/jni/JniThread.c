@@ -217,5 +217,6 @@ JNIEXPORT void JNICALL Java_com_flarejaven_example_jnithread_NdkJniUtils_configS
         LOGI("stickerName for #%d = %s", i, stickerName);
         sprintf(input_strs[i], "%s", stickerName);
         (*env)->ReleaseStringUTFChars(env, objs, stickerName);
+        (*env)->DeleteLocalRef(env, objs);
     }
 }
