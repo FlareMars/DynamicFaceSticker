@@ -31,6 +31,14 @@ JNIEXPORT jstring JNICALL Java_com_flarejaven_example_jnithread_NdkJniUtils_endT
 JNIEXPORT void JNICALL Java_com_flarejaven_example_jnithread_NdkJniUtils_setJNIEnv
   (JNIEnv *, jobject);
 
+/*
+ * Class:     com_flarejaven_example_jnithread_NdkJniUtils
+ * Method:    configStickerNames
+ * Signature: ([Ljava/lang/String;I)V
+ */
+JNIEXPORT void JNICALL Java_com_flarejaven_example_jnithread_NdkJniUtils_configStickerNames
+  (JNIEnv *, jobject, jobjectArray, jint);
+
 #ifdef __cplusplus
 }
 #endif

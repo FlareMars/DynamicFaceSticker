@@ -27,6 +27,7 @@ pthread_mutex_t mutex;
 
 
 int itemSize = 2; // 指明同时使用多少个贴纸
+char input_strs[2][255];
 
 // Output FFmpeg's av_log()
 void custom_log(void *ptr, int level, const char* fmt, va_list vl) {
@@ -39,13 +40,6 @@ void custom_log(void *ptr, int level, const char* fmt, va_list vl) {
 }
 
 void *thread_decode_video(void* arg) {
-    char *input_strs[2] = {
-        "/storage/emulated/0/F_bunny.flv",
-        "/storage/emulated/0/B_vegetable.flv"
-    };
-    //    sprintf(input_str, "%s", "/storage/emulated/0/F_bunny.flv");
-    //    sprintf(input_str2, "%s", "/storage/emulated/0/B_vegetable.flv");
-
     AVFormatContext *pFormatCtxs[ITEM_SIZE];
     int videoIndexes[ITEM_SIZE] = {-1, -1};
     AVCodecContext *pCodecCtxs[ITEM_SIZE];
@@ -162,7 +156,7 @@ void *thread_decode_video(void* arg) {
 
         gettimeofday(&now, NULL);
         outtime.tv_sec = now.tv_sec + 0; // 延时0秒
-        outtime.tv_nsec = now.tv_usec * 1000 + 30 * 1000000; // 延时30毫秒
+        outtime.tv_nsec = now.tv_usec * 1000 + 50 * 1000000; // 延时50毫秒
         pthread_cond_timedwait(&cond, &mutex, &outtime);
     }
     pthread_mutex_unlock(&mutex);
@@ -209,4 +203,19 @@ JNIEXPORT jstring JNICALL Java_com_flarejaven_example_jnithread_NdkJniUtils_endT
 JNIEXPORT void JNICALL Java_com_flarejaven_example_jnithread_NdkJniUtils_setJNIEnv(JNIEnv * env, jobject obj) {
     (*env)->GetJavaVM(env, &g_jvm);
     g_obj = (*env)->NewGlobalRef(env, obj);
+}
+
+JNIEXPORT void JNICALL Java_com_flarejaven_example_jnithread_NdkJniUtils_configStickerNames(JNIEnv * env, jobject obj, jobjectArray stickerNames, jint size) {
+    int i;
+    char* stickerName;
+    itemSize = (int)size;
+    LOGI("itemSize = %d", itemSize);
+    jobject *objs;
+    for (int i = 0; i < itemSize; i++) {
+        objs = (*env)->GetObjectArrayElement(env, stickerNames, i);
+        stickerName = (*env)->GetStringUTFChars(env, (jstring)objs, NULL);
+        LOGI("stickerName for #%d = %s", i, stickerName);
+        sprintf(input_strs[i], "%s", stickerName);
+        (*env)->ReleaseStringUTFChars(env, objs, stickerName);
+    }
 }

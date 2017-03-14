@@ -13,6 +13,7 @@ import android.os.HandlerThread;
 import android.os.Message;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
+import android.util.SparseArray;
 import android.view.View;
 import android.widget.RelativeLayout;
 
@@ -26,10 +27,18 @@ import com.facepp.library.util.SensorEventUtil;
 import com.flarejaven.example.jnithread.NdkJniUtils;
 import com.flarejaven.example.jnithread.R;
 import com.flarejaven.example.jnithread.TextureMatrix;
+import com.flarejaven.example.jnithread.util.FileUtils;
 import com.flarejaven.example.jnithread.util.OpenGLHelper;
+import com.flarejaven.example.jnithread.util.ZipUtils;
 import com.megvii.facepp.sdk.Facepp;
 import com.megvii.facepp.sdk.jni.NativeFaceppAPI;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
@@ -46,6 +55,12 @@ public class MainActivity extends AppCompatActivity
     private static final String TAG = "MainActivity";
     private static final int INDEX_FOREGROUND_STICKER = 0;
     private static final int INDEX_BACKGROUND_STICKER = 1;
+
+    private static final List<String> STICKERS_RES_LIST = new ArrayList<>();
+
+    static {
+        STICKERS_RES_LIST.add("rabbitRes");
+    }
 
     // face tracker parameters
     private boolean is3DPose = true;
@@ -74,18 +89,18 @@ public class MainActivity extends AppCompatActivity
     private NdkJniUtils jni = new NdkJniUtils();
     private GLSurfaceView mGlSurfaceView;
 
-    private final Point bunnyFlvSize = new Point(208, 320);
-    private final Point vegetableFlvSize = new Point(368, 480);
+//    private final Point bunnyFlvSize = new Point(208, 320);
+//    private final Point vegetableFlvSize = new Point(368, 480);
     private volatile boolean isDrawing = false;
 
 //    private Bitmap tempBmp;
 
     private volatile boolean reloadStickers = false;
     private int mStickerNum = 0;
-    private List<Point> mStickerSizes = new ArrayList<>();
-    private List<ByteBuffer> mBitmapBuffers = new ArrayList<>();
-    private List<Integer> mTextureIds = new ArrayList<>();
-    private List<TextureMatrix> mTextureMatrixs = new ArrayList<>();
+    private SparseArray<Point> mStickerSizes = new SparseArray<>();
+    private SparseArray<ByteBuffer> mBitmapBuffers = new SparseArray<>();
+    private SparseArray<Integer> mTextureIds = new SparseArray<>();
+    private SparseArray<TextureMatrix> mTextureMatrixs = new SparseArray<>();
     private int mCameraTextureId = OpenGLHelper.NO_TEXTURE;
     private SurfaceTexture mSurface;
     private CameraMatrix mCameraMatrix;
@@ -198,22 +213,57 @@ public class MainActivity extends AppCompatActivity
     }
 
     public void onStartThreadClick(View view) {
-        reloadStickers = true;
+        boolean isLoadSuccess = true;
+        try {
+            String assetPath = ZipUtils.unZip(view.getContext(), STICKERS_RES_LIST.get(0), ZipUtils.STICKERS_DIR, false);
+            Log.i(TAG, "onStartThreadClick: assetPath = " + assetPath);
+            // step1 read info.json
+            File infoJson = new File(assetPath + File.separator + "info.json");
+            if (!infoJson.exists()) {
+                throw new IOException("info.json for " + STICKERS_RES_LIST.get(0) + " not found!");
+            }
+            String json = FileUtils.readToString(infoJson);
+            JSONObject jsonObject = new JSONObject(json);
+            JSONArray itemArray = jsonObject.getJSONArray("itemList");
+            String[] stickerNames = new String[2];
+            for (int i = 0; i < itemArray.length(); i++) {
+                JSONObject item = itemArray.getJSONObject(i);
+                String type = item.getString("type");
+                String stickerName = item.getString("stickerName");
+                int width = item.getInt("width");
+                int height = item.getInt("height");
+
+                int index = type.equals("F") ? INDEX_FOREGROUND_STICKER : INDEX_BACKGROUND_STICKER;
+                Log.i(TAG, stickerName + " " + index + " " + width + " " + height);
+                mStickerSizes.put(index, new Point(width, height));
+                stickerNames[index] = assetPath + File.separator + stickerName;
+            }
+
+            jni.configStickerNames(stickerNames, itemArray.length());
+        } catch (IOException e) {
+            e.printStackTrace();
+            isLoadSuccess = false;
+        } catch (JSONException e) {
+            e.printStackTrace();
+            isLoadSuccess = false;
+        }
+
+        if (isLoadSuccess) {
+            reloadStickers = true;
+        }
     }
 
     // 配置贴纸信息
     private void loadStickers() {
-        mStickerNum = 2;
-        mStickerSizes.add(bunnyFlvSize);
-        mStickerSizes.add(vegetableFlvSize);
+        mStickerNum = mStickerSizes.size();
 
         for (int i = 0; i < mStickerNum; i++) {
             ByteBuffer bitmapBuffer = OpenGLHelper.createEmptyRGBABuffer(mStickerSizes.get(i));
             Integer textureId = OpenGLHelper.loadTexture(bitmapBuffer, mStickerSizes.get(i), OpenGLHelper.NO_TEXTURE);
             TextureMatrix textureMatrix = new TextureMatrix(textureId);
-            mBitmapBuffers.add(bitmapBuffer);
-            mTextureIds.add(textureId);
-            mTextureMatrixs.add(textureMatrix);
+            mBitmapBuffers.put(i, bitmapBuffer);
+            mTextureIds.put(i, textureId);
+            mTextureMatrixs.put(i, textureMatrix);
         }
 
         if (mStickerNum == 2) {
@@ -322,7 +372,7 @@ public class MainActivity extends AppCompatActivity
             List<FloatBuffer> vertextBuffers = new ArrayList<>();
 //                    Log.d(TAG, "run: faces_size = " + faces.length);
 
-            if (faces.length >= 0 && mStickerNum >= 1) {
+            if (faces.length >= 0 && mTextureMatrixs.get(INDEX_FOREGROUND_STICKER) != null) {
                 for (Facepp.Face face : faces) {
                     if (is106Points) {
                         facepp.getLandmark(face, Facepp.FPP_GET_LANDMARK106);
@@ -356,7 +406,7 @@ public class MainActivity extends AppCompatActivity
                             face.points[LandmarkConstants.MG_CONTOUR_RIGHT2].x, face.points[LandmarkConstants.MG_CONTOUR_RIGHT2].y);
                     targetWidth *= 1.2f; // TODO size coefficient of correction
                     float targetHeight = targetWidth * ((float)mStickerSizes.get(INDEX_FOREGROUND_STICKER).y / (float)mStickerSizes.get(INDEX_FOREGROUND_STICKER).x);
-                    Log.d(TAG, "run: height = " + targetHeight + " width = " + targetWidth);
+//                    Log.d(TAG, "run: height = " + targetHeight + " width = " + targetWidth);
 
                     float[] aPoint = new float[] {pivotDown.x - targetWidth / 2, pivotDown.y}; // left_bottom
                     float[] bPoint = new float[] {pivotDown.x + targetWidth / 2, pivotDown.y}; // right_bottom

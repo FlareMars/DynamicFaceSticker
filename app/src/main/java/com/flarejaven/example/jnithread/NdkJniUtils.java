@@ -23,6 +23,7 @@ public class NdkJniUtils {
     public native String startThread();
     public native String endThread();
     public native void setJNIEnv();
+    public native void configStickerNames(String[] stickerNames, int size);
 
     public void callback(final byte[] data, int width, int height, int index) {
 //        Log.d(TAG, "callback: " + data.length + " width = " + width + " height = " + height);

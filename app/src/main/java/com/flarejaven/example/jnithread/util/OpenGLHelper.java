@@ -19,11 +19,15 @@ import java.nio.ShortBuffer;
 
 import javax.microedition.khronos.opengles.GL10;
 
+import static android.content.ContentValues.TAG;
+
 /**
  * Created by root on 17-2-22.
  */
 
 public class OpenGLHelper {
+
+    private static final String TAG = "OpenGLHelper";
 
     public static final int NO_TEXTURE = -1;
 
@@ -85,6 +89,8 @@ public class OpenGLHelper {
             byteBuffers.clear();
             byteBuffers.put(data);
             byteBuffers.position(0);
+        } else {
+            Log.e(TAG, "fillData: byteBuffers.capacity() < data.length");
         }
     }
 
